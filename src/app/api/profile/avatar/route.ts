@@ -1,40 +1,18 @@
-import { randomBytes } from "node:crypto";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import path from "node:path";
-import os from "os";
-
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
-
 import { getCurrentUser, isSameOrigin } from "@/server/auth/session";
 import { getDb } from "@/server/db/client";
 import { userProfiles } from "@/server/db/schema";
 
 export const runtime = "nodejs";
-
 const MAX_BYTES = 5 * 1024 * 1024;
-const DIR = path.join(os.tmpdir(), "avatars");
 
-function detectExt(b: Buffer): "jpg" | "png" | "webp" | null {
-  if (b.length > 12 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "jpg";
-  if (b.length > 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "png";
-  if (b.length > 12 && b.subarray(0, 4).toString("ascii") === "RIFF" && b.subarray(8, 12).toString("ascii") === "WEBP") return "webp";
+function detectExt(b: Buffer): string | null {
+  if (b[0] === 0xff && b[1] === 0xd8) return "jpeg";
+  if (b.subarray(0, 8).toString("hex").startsWith("89504e47")) return "png";
+  if (b.subarray(0, 4).toString() === "RIFF") return "webp";
   return null;
-}
-
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const file = searchParams.get("f");
-  if (!file) return new Response("Not found", { status: 404 });
-  try {
-    const data = await readFile(path.join(DIR, path.basename(file)));
-    const ext = file.split(".").pop();
-    const type = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
-    return new Response(data as any, { headers: { "Content-Type": type } });
-  } catch {
-    return new Response("Not found", { status: 404 });
-  }
 }
 
 export async function POST(req: Request) {
@@ -45,26 +23,18 @@ export async function POST(req: Request) {
   const form = await req.formData().catch(() => null);
   const file = form?.get("avatar");
   if (!(file instanceof File)) return NextResponse.json({ error: "Envie uma imagem." }, { status: 400 });
-  if (file.size === 0 || file.size > MAX_BYTES) return NextResponse.json({ error: "A imagem deve ter até 5MB." }, { status: 400 });
+  if (file.size > MAX_BYTES) return NextResponse.json({ error: "Até 5MB." }, { status: 400 });
 
   const bytes = Buffer.from(await file.arrayBuffer());
   const ext = detectExt(bytes);
   if (!ext) return NextResponse.json({ error: "Use JPG, PNG ou WEBP." }, { status: 400 });
 
-  const name = `${user.id}-${randomBytes(6).toString("hex")}.${ext}`;
-  await mkdir(DIR, { recursive: true });
-  await writeFile(path.join(DIR, name), bytes);
+  const base64 = bytes.toString("base64");
+  const avatarUrl = `data:image/${ext};base64,${base64}`;
 
   const db = getDb();
-  const [prev] = await db.select({ url: userProfiles.avatarUrl }).from(userProfiles).where(eq(userProfiles.userId, user.id));
-  const url = `/api/profile/avatar?f=${name}`;
+  await db.insert(userProfiles).values({ userId: user.id, avatarUrl }).onConflictDoUpdate({ target: userProfiles.userId, set: { avatarUrl, updatedAt: new Date() } });
 
-  await db.insert(userProfiles).values({ userId: user.id, avatarUrl: url }).onConflictDoUpdate({ target: userProfiles.userId, set: { avatarUrl: url, updatedAt: new Date() } });
-
-  if (prev?.url?.includes(`${user.id}-`)) {
-    await unlink(path.join(DIR, path.basename(prev.url))).catch(() => null);
-  }
-
-  revalidatePath("/perfil");
-  return NextResponse.json({ url });
+  revalidatePath("/");
+  return NextResponse.json({ url: avatarUrl });
 }
