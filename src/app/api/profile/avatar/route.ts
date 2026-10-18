@@ -12,8 +12,11 @@ import { userProfiles } from "@/server/db/schema";
 
 export const runtime = "nodejs";
 
+import os from "os";
+
 const MAX_BYTES = 5 * 1024 * 1024;
-const DIR = path.join(process.cwd(), "public", "avatars");
+
+const DIR = path.join(os.tmpdir(), "avatars");
 
 /** Detecta o tipo pelos bytes do arquivo, sem confiar no nome nem no Content-Type enviados. */
 function detectExt(b: Buffer): "jpg" | "png" | "webp" | null {
