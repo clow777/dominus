@@ -403,6 +403,8 @@ export const paymentCustomers = pgTable(
     /** CPF/CNPJ apenas quando o provedor exige. */
     document: varchar("document", { length: 14 }),
     externalReference: varchar("external_reference", { length: 128 }),
+    /** Cliente bloqueado manualmente pelo lojista. */
+    blocked: boolean("blocked").notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -462,15 +464,19 @@ export const transactions = pgTable(
     refundedAmount: money("refunded_amount").notNull().default(0),
     failureReason: text("failure_reason"),
     reconciliationRef: varchar("reconciliation_ref", { length: 191 }),
+    /** Bot do Telegram que originou a venda (preenchido pelo motor de fluxos). */
+    botId: uuid("bot_id"),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    index("transactions_bot_idx").on(t.botId, t.status),
     uniqueIndex("transactions_public_id_uq").on(t.publicId),
     uniqueIndex("transactions_provider_external_uq").on(t.provider, t.externalId),
     index("transactions_org_created_idx").on(t.organizationId, t.createdAt),
     index("transactions_org_status_idx").on(t.organizationId, t.status),
+    index("transactions_org_status_approved_idx").on(t.organizationId, t.status, t.approvedAt),
     check("transactions_amount_ck", sql`${t.amount} > 0`),
     check("transactions_refunded_ck", sql`${t.refundedAmount} >= 0 AND ${t.refundedAmount} <= ${t.amount}`),
   ],
@@ -694,7 +700,305 @@ export const ledgerEntries = pgTable(
   ],
 );
 
+/* ─────────────────────────── Produto: gateways, trackeamento, notificações, fluxos ─────────────────────────── */
+
+export const platformGateways = pgTable(
+  "platform_gateways",
+  {
+    id: id(),
+    organizationId: orgRef(),
+    gatewayKey: varchar("gateway_key", { length: 48 }).notNull(),
+    /** inactive | configured | active */
+    status: varchar("status", { length: 16 }).notNull().default("inactive"),
+    /** AES-256-GCM (v1:iv:tag:dados). Nunca devolvida ao navegador. */
+    apiKeyEncrypted: text("api_key_encrypted"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("platform_gateways_org_key_uq").on(t.organizationId, t.gatewayKey)],
+);
+
+export const trackingConfigs = pgTable(
+  "tracking_configs",
+  {
+    id: id(),
+    organizationId: orgRef(),
+    platform: varchar("platform", { length: 24 }).notNull(),
+    enabled: boolean("enabled").notNull().default(false),
+    /** Pixel ID / token, cifrado. */
+    valueEncrypted: text("value_encrypted"),
+    eventsSent: integer("events_sent").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("tracking_configs_org_platform_uq").on(t.organizationId, t.platform)],
+);
+
+export const notificationPreferences = pgTable(
+  "notification_preferences",
+  {
+    id: id(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    key: varchar("key", { length: 48 }).notNull(),
+    enabled: boolean("enabled").notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("notification_prefs_user_key_uq").on(t.userId, t.key)],
+);
+
+export const userProfiles = pgTable("user_profiles", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  phone: varchar("phone", { length: 20 }),
+  cpf: varchar("cpf", { length: 14 }),
+  /** Caminho público em /public/avatars (ex.: /avatars/<arquivo>.png). */
+  avatarUrl: varchar("avatar_url", { length: 160 }),
+  updatedAt: updatedAt(),
+});
+
+export const flows = pgTable(
+  "flows",
+  {
+    id: id(),
+    organizationId: orgRef(),
+    name: varchar("name", { length: 120 }).notNull(),
+    /** basic | advanced */
+    kind: varchar("kind", { length: 16 }).notNull().default("basic"),
+    /** draft | active */
+    status: varchar("status", { length: 16 }).notNull().default("draft"),
+    /** Bot do Telegram vinculado (Fase 2). */
+    botId: uuid("bot_id"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("flows_org_idx").on(t.organizationId)],
+);
+
+export const flowSteps = pgTable(
+  "flow_steps",
+  {
+    id: id(),
+    flowId: uuid("flow_id")
+      .notNull()
+      .references(() => flows.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    /** message | pix | wait_payment | deliver */
+    kind: varchar("kind", { length: 24 }).notNull(),
+    config: jsonb("config").$type<Record<string, string>>().notNull().default({}),
+  },
+  (t) => [index("flow_steps_flow_idx").on(t.flowId, t.position)],
+);
+
+/** Cada /start recebido por um bot do Telegram da organização (preenchida pela Fase 2). */
+export const botStarts = pgTable(
+  "bot_starts",
+  {
+    id: id(),
+    organizationId: orgRef(),
+    /** Bot do Telegram (Fase 2); sem FK até a tabela de bots existir. */
+    botId: uuid("bot_id"),
+    telegramUserId: varchar("telegram_user_id", { length: 32 }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("bot_starts_org_created_idx").on(t.organizationId, t.createdAt)],
+);
+
+/* ─────────────────────────── Telegram, leads, campanhas, eventos ─────────────────────────── */
+
+/** Barramento de eventos de domínio. `dedupe_key` torna a publicação e o consumo idempotentes. */
+export const domainEvents = pgTable(
+  "domain_events",
+  {
+    id: id(),
+    organizationId: orgRef(),
+    type: varchar("type", { length: 48 }).notNull(),
+    dedupeKey: varchar("dedupe_key", { length: 191 }).notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    /** pending | done | failed */
+    status: varchar("status", { length: 16 }).notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("domain_events_dedupe_uq").on(t.dedupeKey),
+    index("domain_events_pending_idx").on(t.status, t.nextAttemptAt),
+    index("domain_events_org_created_idx").on(t.organizationId, t.createdAt),
+  ],
+);
+
+export const bots = pgTable(
+  "bots",
+  {
+    id: id(),
+    organizationId: orgRef(),
+    telegramBotId: varchar("telegram_bot_id", { length: 32 }).notNull(),
+    username: varchar("username", { length: 64 }).notNull(),
+    name: varchar("name", { length: 128 }).notNull(),
+    /** AES-256-GCM. Nulo depois de desconectar. */
+    tokenEncrypted: text("token_encrypted"),
+    /** sha256 do token: impede o mesmo bot em duas contas sem guardar o token em claro. */
+    tokenHash: varchar("token_hash", { length: 64 }),
+    /** Segredo do header X-Telegram-Bot-Api-Secret-Token (cifrado). */
+    webhookSecretEncrypted: text("webhook_secret_encrypted"),
+    /** online | offline | paused | disconnected */
+    status: varchar("status", { length: 16 }).notNull().default("offline"),
+    lastError: text("last_error"),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("bots_org_idx").on(t.organizationId, t.status),
+    uniqueIndex("bots_token_hash_uq").on(t.tokenHash),
+  ],
+);
+
+export const leads = pgTable(
+  "leads",
+  {
+    id: id(),
+    organizationId: orgRef(),
+    botId: uuid("bot_id")
+      .notNull()
+      .references(() => bots.id, { onDelete: "restrict" }),
+    telegramId: varchar("telegram_id", { length: 32 }).notNull(),
+    firstName: varchar("first_name", { length: 128 }),
+    username: varchar("username", { length: 64 }),
+    language: varchar("language", { length: 16 }),
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    hasPaid: boolean("has_paid").notNull().default(false),
+    /** O lead bloqueou o bot (Telegram respondeu 403). */
+    blocked: boolean("blocked").notNull().default(false),
+    /** Payload do /start (código de rastreio, Parte 6). */
+    startPayload: varchar("start_payload", { length: 64 }),
+    startedAt: createdAt(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("leads_bot_telegram_uq").on(t.botId, t.telegramId),
+    index("leads_org_started_idx").on(t.organizationId, t.startedAt),
+  ],
+);
+
+export const campaigns = pgTable(
+  "campaigns",
+  {
+    id: id(),
+    organizationId: orgRef(),
+    botId: uuid("bot_id")
+      .notNull()
+      .references(() => bots.id, { onDelete: "restrict" }),
+    name: varchar("name", { length: 120 }).notNull(),
+    /** all | not_paid | paid | tag */
+    audience: varchar("audience", { length: 16 }).notNull(),
+    audienceTag: varchar("audience_tag", { length: 48 }),
+    text: text("text").notNull(),
+    mediaUrl: text("media_url"),
+    buttons: jsonb("buttons").$type<{ text: string; url: string }[]>().notNull().default([]),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull().defaultNow(),
+    /** scheduled | sending | done | cancelled */
+    status: varchar("status", { length: 16 }).notNull().default("scheduled"),
+    total: integer("total").notNull().default(0),
+    sent: integer("sent").notNull().default(0),
+    failed: integer("failed").notNull().default(0),
+    blocked: integer("blocked").notNull().default(0),
+    createdAt: createdAt(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("campaigns_org_idx").on(t.organizationId, t.createdAt), index("campaigns_due_idx").on(t.status, t.scheduledAt)],
+);
+
+export const campaignDeliveries = pgTable(
+  "campaign_deliveries",
+  {
+    id: id(),
+    campaignId: uuid("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    leadId: uuid("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "restrict" }),
+    /** pending | sent | failed | blocked */
+    status: varchar("status", { length: 16 }).notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    error: text("error"),
+  },
+  (t) => [
+    uniqueIndex("campaign_deliveries_uq").on(t.campaignId, t.leadId),
+    index("campaign_deliveries_due_idx").on(t.status, t.nextAttemptAt),
+  ],
+);
+
+/** Execução de um fluxo para um lead. `current_step` é a posição do próximo passo a executar. */
+export const flowRuns = pgTable(
+  "flow_runs",
+  {
+    id: id(),
+    organizationId: orgRef(),
+    flowId: uuid("flow_id")
+      .notNull()
+      .references(() => flows.id, { onDelete: "cascade" }),
+    botId: uuid("bot_id")
+      .notNull()
+      .references(() => bots.id, { onDelete: "restrict" }),
+    leadId: uuid("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "restrict" }),
+    /** running | waiting_payment | completed | failed | expired | cancelled */
+    status: varchar("status", { length: 20 }).notNull().default("running"),
+    currentStep: integer("current_step").notNull().default(0),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Fim da espera do passo "Aguardar pagamento". */
+    waitUntil: timestamp("wait_until", { withTimezone: true }),
+    /** Transação PIX gerada pelo passo "Gerar PIX" desta execução. */
+    transactionId: uuid("transaction_id").references(() => transactions.id),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [
+    // Um lead não pode ter duas execuções ativas do mesmo fluxo (reenvio de /start).
+    uniqueIndex("flow_runs_active_uq")
+      .on(t.leadId, t.flowId)
+      .where(sql`${t.status} in ('running', 'waiting_payment')`),
+    index("flow_runs_due_idx").on(t.status, t.nextRunAt),
+    index("flow_runs_txn_idx").on(t.transactionId),
+    index("flow_runs_org_idx").on(t.organizationId, t.createdAt),
+  ],
+);
+
 /* ─────────────────────────── Conciliação ─────────────────────────── */
+
+/** Log de depuração de cada chamada ao provedor. Nunca guarda cabeçalhos nem credenciais. */
+export const gatewayLogs = pgTable(
+  "gateway_logs",
+  {
+    id: id(),
+    organizationId: uuid("organization_id").references(() => organizations.id),
+    provider: varchar("provider", { length: 64 }).notNull(),
+    /** create_pix | get_status | get_balance | webhook | test_connection */
+    operation: varchar("operation", { length: 32 }).notNull(),
+    httpMethod: varchar("http_method", { length: 8 }),
+    path: varchar("path", { length: 191 }),
+    httpStatus: integer("http_status"),
+    ok: boolean("ok").notNull(),
+    durationMs: integer("duration_ms"),
+    request: jsonb("request"),
+    response: text("response"),
+    error: text("error"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("gateway_logs_provider_idx").on(t.provider, t.createdAt), index("gateway_logs_org_idx").on(t.organizationId, t.createdAt)],
+);
 
 export const reconciliationRuns = pgTable(
   "reconciliation_runs",

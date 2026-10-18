@@ -1,0 +1,5 @@
+<!-- TODO: substituir pela logo oficial da DominusPay (placeholder). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 72" role="img" aria-label="DOMINUS">
+  <rect width="320" height="72" fill="#000"/>
+  <text x="160" y="50" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="40" font-weight="800" letter-spacing="6" fill="#ff0033">DOMINUS</text>
+</svg>

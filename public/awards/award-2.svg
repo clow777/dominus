@@ -1,0 +1,6 @@
+<!-- TODO: substituir pela arte oficial da placa 2 (placeholder preto + dourado). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 300" role="img" aria-label="Placa 2">
+  <rect width="240" height="300" rx="16" fill="#0a0a0a" stroke="#d4af37" stroke-width="4"/>
+  <text x="120" y="130" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="52" font-weight="800" fill="#d4af37">100 MIL</text>
+  <text x="120" y="180" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="20" fill="#d4af37">FATURADOS</text>
+</svg>

@@ -1,0 +1,10 @@
+import { dashRoute } from "@/server/dash/route";
+import { getRanking } from "@/server/dash/metrics";
+
+export const dynamic = "force-dynamic";
+
+export const GET = (request: Request) =>
+  dashRoute(request, ({ orgId, params }) => {
+    const limit = Math.min(50, Math.max(1, Number(params.get("limite")) || 5));
+    return getRanking(orgId, limit);
+  });

@@ -18,7 +18,7 @@ const TONE_BY_STATUS: Record<TransactionStatus, Tone> = {
 
 const toneClasses: Record<Tone, string> = {
   neutral: "text-steel-light before:bg-steel",
-  positive: "text-success-text before:bg-success",
+  positive: "text-paper before:bg-brand-red",
   attention: "text-warning-text before:bg-warning",
   negative: "text-danger-text before:bg-dominus",
 };

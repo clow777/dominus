@@ -17,6 +17,24 @@
   --color-paper-soft: #f5f5f5;
   --color-dominus: #b51224;
   --color-dominus-hover: #d21f35;
+  /* Dashboard: cores oficiais Dominus Pay. */
+  --color-dash-bg: #000000;
+  --color-brand-red: #c70000;
+
+  /* Dashboard DominusPay — Black Ruby Neon. */
+  --color-dp-card: #0a0a0a;
+  --color-dp-inner: #0f0f0f;
+  --color-dp-border: rgba(139, 0, 0, 0.3);
+  --color-dp-divider: rgba(139, 0, 0, 0.25);
+  --color-dp-muted: #e5e5e5;
+  --color-dp-dim: #c4c4c4;
+  --color-dp-primary: #c70000;
+  --color-dp-alt: #8b0000;
+  --color-dp-tint: #1a0000;
+  --color-dp-neg: #ff4d4d;
+  --color-dp-starts: #ffffff;
+  --dp-glow: rgba(199, 0, 0, 0.6);
+  --dp-soft: rgba(199, 0, 0, 0.15);
   /* Variante clara do vermelho só para texto de erro sobre fundo escuro (contraste ≥ 4.5:1). */
   --color-danger-text: #f2626f;
   --color-success: #16865b;
@@ -26,6 +44,8 @@
 
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-inter: Inter, var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-jb: "JetBrains Mono", var(--font-geist-mono), ui-monospace, monospace;
 
   /* Escala tipográfica (razão ~1.25, display fluido) */
   --text-display: clamp(3.25rem, 2rem + 6vw, 7rem);
@@ -55,6 +75,119 @@
   @keyframes shimmer {
     from { background-position: -200% 0; }
     to { background-position: 200% 0; }
+  }
+}
+
+/* Rubi controlado pelo ThemeContext (--ruby-dark / --ruby-bright). */
+@theme inline {
+  --color-ruby: var(--ruby-bright);
+  --color-ruby-dark: var(--ruby-dark);
+}
+
+:root {
+  --bg-pure: #000;
+  --bg-card: #0a0a0a;
+  --ruby-dark: #8b0000;
+  --ruby-bright: #c70000;
+  --ruby-glow: rgba(199, 0, 0, 0.6);
+  --white-neon: #fff;
+}
+
+/* Remapeia os tokens neutros só dentro da área logada: a landing não muda. */
+.theme-ruby {
+  --color-ink: #000;
+  --color-ink-2: #0a0a0a;
+  --color-ink-3: #0f0f0f;
+  --color-line: rgba(139, 0, 0, 0.3);
+  --color-line-strong: rgba(199, 0, 0, 0.5);
+  --color-steel: #e5e5e5;
+  --color-steel-light: #f5f5f5;
+  /* Sem cinza morto: os neutros do Tailwind viram branco neon / rubi escuro. */
+  --color-zinc-300: #f5f5f5;
+  --color-zinc-400: #e5e5e5;
+  --color-zinc-500: #d4d4d4;
+  --color-zinc-600: #b8b8b8;
+  --color-zinc-800: rgba(139, 0, 0, 0.35);
+  --color-zinc-900: #0a0a0a;
+  --color-red-300: #ff6b6b;
+  --color-red-400: #ff4d4d;
+  --color-red-500: #c70000;
+  color: #fff;
+}
+.theme-ruby :where(h1, h2, h3, h4, strong, th) {
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
+}
+
+.text-neon {
+  color: var(--white-neon);
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+}
+.ruby-neon {
+  background: linear-gradient(135deg, var(--ruby-dark), var(--ruby-bright));
+  box-shadow: 0 0 20px var(--ruby-glow), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+.card-neon {
+  background: var(--bg-card);
+  border: 1px solid rgba(199, 0, 0, 0.25);
+  box-shadow: 0 0 15px rgba(199, 0, 0, 0.12);
+}
+
+@layer components {
+  .dp-menu-item {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid rgba(139, 0, 0, 0.3);
+    border-radius: 0.5rem;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 14px;
+    font-weight: 700;
+    transition: all 300ms ease-in-out;
+  }
+  .dp-menu-item::before {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    z-index: -1;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+    transform: translateX(-100%);
+    transition: transform 600ms;
+  }
+  .dp-menu-item:hover,
+  .dp-menu-item:focus-visible {
+    transform: scale(1.02);
+    background: #0a0a0a;
+    color: #fff;
+    border-color: var(--ruby-bright);
+    box-shadow: 0 0 8px var(--ruby-glow), 0 0 16px rgba(199, 0, 0, 0.3), inset 0 0 8px rgba(255, 255, 255, 0.05);
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.8), 0 0 20px rgba(255, 255, 255, 0.5);
+  }
+  .dp-menu-item:hover::before,
+  .dp-menu-item:focus-visible::before {
+    transform: translateX(100%);
+  }
+  .dp-menu-item[aria-current="page"] {
+    background: linear-gradient(135deg, var(--ruby-dark), var(--ruby-bright));
+    border-color: var(--ruby-bright);
+    box-shadow: 0 0 20px var(--ruby-glow), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dp-menu-item {
+      transition: none;
+    }
+    .dp-menu-item:hover,
+    .dp-menu-item:focus-visible {
+      transform: none;
+    }
+    .dp-menu-item::before {
+      display: none;
+    }
   }
 }
 

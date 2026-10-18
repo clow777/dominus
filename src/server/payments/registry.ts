@@ -1,6 +1,7 @@
 import "server-only";
 
 import { serverEnv } from "@/server/env";
+import { elevaProvider } from "./adapters/eleva";
 import { unconfiguredProvider } from "./adapters/unconfigured";
 import type { PaymentProviderAdapter } from "./provider";
 
@@ -13,6 +14,7 @@ import type { PaymentProviderAdapter } from "./provider";
  */
 const ADAPTERS: Record<string, PaymentProviderAdapter> = {
   none: unconfiguredProvider,
+  eleva: elevaProvider,
 };
 
 export function getPaymentProvider(): PaymentProviderAdapter {

@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+
 import {
   Developers,
   Faq,
@@ -15,8 +17,14 @@ import { Header } from "@/components/landing/header";
 import { Hero } from "@/components/landing/hero";
 import { LandingShell } from "@/components/landing/landing-shell";
 import { site } from "@/lib/site";
+import { getCurrentUser } from "@/server/auth/session";
+import { getHomePath } from "@/server/kyc/service";
 
-export default function HomePage() {
+export default async function HomePage() {
+  // Visitante sem sessão continua vendo a landing pública.
+  const user = await getCurrentUser();
+  if (user) redirect(await getHomePath(user.id));
+
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Organization",
